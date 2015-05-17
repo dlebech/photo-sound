@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Photo to sound</title>
+<script src="/js/tracking.js"></script>
+<script src="/js/eye.js"></script>
+<script src="/js/mouth.js"></script>
+<script src="/js/face.js"></script>
+</head>
+<body>
+    <div id="container">
+    </div>
+<script>
+var cnt = document.getElementById('container');
+var img = document.createElement('img');
+img.src = '/img/test2.jpg';
+img.onload = function() {
+    var width = img.width;
+    var height = img.height;
+    console.log('Width', width, 'Height', height);
+
+    // Draw original picture.
+    var canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, width, height);
+    var imgData = ctx.getImageData(0, 0, width, height).data;
+    console.log(imgData.length, 'pixels');
+    cnt.appendChild(canvas);
+
+    // Turn into grayscale and find corners.
+    // Findcorners expects grayscale pixels.
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    ctx = canvas.getContext('2d');
+
+    var gray = tracking.Image.grayscale(imgData, width, height);
+    console.log(gray.length, 'gray pixels');
+
+    var newData = ctx.createImageData(width, height);
+    var data = newData.data;
+    for (var i = 0; i < gray.length; i++) {
+        data[i*4] = gray[i];
+        data[i*4 + 1] = gray[i];
+        data[i*4 + 2] = gray[i];
+        data[i*4 + 3] = 255;
+    }
+    ctx.putImageData(newData, 0, 0);
+
+    var corners = tracking.Fast.findCorners(gray, width, height);
+    console.log(corners.length, 'corners');
+    for (var i = 0; i < corners.length; i += 2) {
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(corners[i], corners[i+1], 3, 3);
+    }
+
+    cnt.appendChild(canvas);
+
+    var px = tracking.Image.blur(imgData, width, height, 7);
+    createCanvas(px, width, height, cnt);
+
+    px = tracking.Image.horizontalConvolve(
+            imgData, width, height, [-1, 0, 1], 100);
+    createCanvas(px, width, height, cnt);
+
+    px = tracking.Image.verticalConvolve(
+            imgData, width, height, [-1, 0, 1], 100);
+    createCanvas(px, width, height, cnt);
+
+    px = tracking.Image.separableConvolve(
+            imgData, width, height, [-1, 0, 1], [-1, 0, 1], 100);
+    createCanvas(px, width, height, cnt);
+
+    px = tracking.Image.sobel(imgData, width, height);
+    createCanvas(px, width, height, cnt);
+};
+
+function createCanvas(px, width, height, containerElem) {
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    ctx = canvas.getContext('2d');
+
+    var imgData = ctx.createImageData(width, height);
+    var data = imgData.data;
+    for (var i = 0; i < data.length; i++) {
+        data[i] = px[i];
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    containerElem.appendChild(canvas);
+}
+</script>
+</body>
+</html>

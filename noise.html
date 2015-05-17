@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Photo to sound</title>
+<script src="/js/perlin.js"></script>
+<script src="/js/tracking.js"></script>
+<script src="/js/eye.js"></script>
+<script src="/js/mouth.js"></script>
+<script src="/js/face.js"></script>
+<style>
+  .rect {
+    border: 2px solid #a64ceb;
+    left: -1000px;
+    position: absolute;
+    top: -1000px;
+  }
+</style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+    </div>
+<script>
+var container = document.getElementById('container');
+
+window.plot = function(x, y, w, h) {
+    console.log(x, y, w, h);
+    var rect = document.createElement('div');
+    container.appendChild(rect);
+    rect.classList.add('rect');
+    rect.style.width = w + 'px';
+    rect.style.height = h + 'px';
+    rect.style.left = (img.offsetLeft + x) + 'px';
+    rect.style.top = (img.offsetTop + y) + 'px';
+};
+
+noise.seed(Math.random());
+
+var MyMath = function() {};
+
+MyMath.avg = function avg(arr) {
+    var sum = 0;
+    for (var i = 0; i < arr.length; i++) {
+        sum += arr[i];
+    }
+    return 1.0 * sum / arr.length;
+};
+
+var NoisePlayer = function() {
+    this.time = 0;
+
+    // Ctx.
+    this.context = new AudioContext();
+
+    // Gain/mixer.
+    this.mixer = this.context.createGain();
+    this.mixer.gain.value = 0.5;
+
+    // Compressor.
+    var compressor = this.context.createDynamicsCompressor();
+    compressor.threshold.value = -50;
+    compressor.knee.value = 40;
+    compressor.ratio.value = 12;
+    compressor.reduction.value = -20;
+    compressor.attack.value = 0;
+    compressor.release.value = 0.25;
+    this.mixer.connect(compressor);
+    compressor.connect(this.context.destination);
+
+    this.oscillators = [];
+};
+
+var waveForms = ['sine', 'triangle', 'sawtooth'];
+
+NoisePlayer.prototype.initWave = function(imgData) {
+    console.log('Setting up wave for:', imgData);
+
+    // Normalize 0-255 to be between between 20 and 500 hertz.
+    // (newmax - newmin) / (oldmax-oldmin) * (x - oldmax) + newmax
+    var avg = MyMath.avg(imgData.data.subarray(0, 3));
+    var freq = 680 / 255 * (avg - 255) + 700;
+    console.log('Avg', avg, 'Norm', freq);
+
+    // Create an oscillator and set the frequency to the image value.
+    var osc = this.context.createOscillator();
+    osc.type = waveForms[Math.floor(Math.random()*waveForms.length)];
+    osc.frequency.value = Math.round(freq);
+
+    // Connect to mixer and save the wave.
+    osc.connect(this.mixer);
+    this.oscillators.push(osc);
+};
+
+NoisePlayer.prototype.init = function(canvas) {
+    var width = canvas.width;
+    var height = canvas.height;
+    var ctx = canvas.getContext('2d');
+    var imgData = ctx.getImageData(0, 0, width, height);
+    var gray = tracking.Image.grayscale(imgData.data, width, height);
+    console.log(gray.length, 'Gray pixels');
+
+    tracking.Fast.THRESHOLD = 80;
+
+    var corners = tracking.Fast.findCorners(gray, width, height);
+    console.log(corners.length/2, 'corners');
+
+    while (corners.length/2 > 100) {
+        tracking.Fast.THRESHOLD += 1;
+        var corners = tracking.Fast.findCorners(gray, width, height);
+        console.log('Threshold:', tracking.Fast.THRESHOLD,
+                    'Corners:', corners.length/2);
+    }
+
+    for (var i = 0; i < corners.length; i += 2) {
+        var pixel = ctx.getImageData(corners[i], corners[i+1], 1, 1);
+        this.initWave(pixel);
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(corners[i], corners[i+1], 3, 3);
+    }
+};
+
+NoisePlayer.prototype.schedule = function() {
+    var this_ = this;
+    var f = function() {
+        this_.update();
+    };
+    setTimeout(f, 50);
+};
+
+NoisePlayer.prototype.play = function() {
+    if (this.started)
+        return;
+
+    this.started = true;
+    for (var i = 0; i < this.oscillators.length; i++) {
+        this.oscillators[i].start();
+    }
+    this.schedule();
+};
+
+NoisePlayer.prototype.update = function() {
+    for (var i = 0; i < this.oscillators.length; i++) {
+        var osc = this.oscillators[i];
+        var offset = noise.perlin2(i, this.time) * 10;
+        osc.type = 'sine'; // waveForms[Math.floor(Math.random()*waveForms.length)];
+        osc.frequency.value += Math.round(offset);
+        //osc.frequency.value += Math.abs(Math.round(offset));
+        //if (osc.frequency.value > 700) {
+        //    osc.frequency.value = 20;
+        //}
+    }
+    this.time += 0.1;
+    this.schedule();
+}
+
+var player = new NoisePlayer();
+
+var canvas = document.getElementById('canvas');
+var ctx = null;
+
+var img = document.createElement('img');
+img.src = '/img/test2.jpg';
+
+function createCanvas(px, width, height) {
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    ctx = canvas.getContext('2d');
+
+    var imgData = ctx.createImageData(width, height);
+    var data = imgData.data;
+    for (var i = 0; i < data.length; i++) {
+        data[i] = px[i];
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    container.appendChild(canvas);
+
+    return canvas;
+}
+
+img.onload = function() {
+    var width = this.width;
+    var height = this.height;
+    console.log('Width', width, 'Height', height);
+
+    // Draw original picture.
+    canvas.width = width;
+    canvas.height = height;
+    ctx = canvas.getContext('2d');
+
+    ctx.drawImage(this, 0, 0, width, height);
+    var imgData = ctx.getImageData(0, 0, width, height);
+    console.log(imgData.data.length, 'pixels');
+
+    player.init(canvas);
+
+    // Draw sobel
+    var sobel = tracking.Image.sobel(imgData.data, width, height);
+    var cv = createCanvas(sobel, width, height);
+
+    //var tracker = new tracking.ObjectTracker(['mouth']);
+    //tracker.setStepSize(1.7);
+    //tracker.on('track', function(e) {
+    //     e.data.forEach(function(rect) {
+    //         window.plot(rect.x, rect.y, rect.width, rect.height);
+    //     });
+    //});
+    //tracker.track(imgData.data, width, height);
+
+    // Start the animation.
+    //step();
+};
+
+var time = 0;
+var timeInc = 0.1;
+
+function renderByXY(carryOver, onlyIncrement) {
+    carryOver = carryOver || false;
+    onlyIncrement = onlyIncrement || false;
+    var imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    for (var x = 0; x < canvas.width; x++) {
+        for (var y = 0; y < canvas.height; y++) {
+            var val = noise.perlin3(x, y, time)*5;
+            if (onlyIncrement)
+                val = Math.abs(val);
+            var i = (y * canvas.width + x) * 4;
+            // Vary the red component
+            for (var color = 0; color <= 2; color++) {
+                var newVal = imgData.data[i+color] + val;
+                if (newVal > 255) {
+                    if (carryOver) {
+                        newVal = newVal-255; // Yields a value just above 0.
+                    }
+                    else {
+                        newVal = 255-(newVal-255); // Yields a value just below 255.
+                    }
+                }
+                else if (newVal < 0) {
+                    if (carryOver) {
+                        newVal = 255+newVal; // Yields a value just below 255.
+                    }
+                    else {
+                        newVal = -newVal; // Yields a value just above 0.
+                    }
+                }
+                imgData.data[i+color] = newVal;
+            }
+        }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    time += timeInc;
+}
+
+function renderByPixel(carryOver, onlyIncrement) {
+    carryOver = carryOver || false;
+    onlyIncrement = onlyIncrement || false;
+    var imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    for (var i = 0; i < imgData.data.length; i++) {
+        // Don't touch the alpha channel.
+        if ((i+1) % 4 === 0 && i > 1)
+            continue;
+
+        var val = noise.perlin2(i, time)*5;
+        if (onlyIncrement)
+            val = Math.abs(val);
+
+        var newVal = imgData.data[i] + val;
+        if (newVal > 255) {
+            if (carryOver) {
+                newVal = newVal-255; // Yields a value just above 0.
+            }
+            else {
+                newVal = 255-(newVal-255); // Yields a value just below 255.
+            }
+        }
+        else if (newVal < 0) {
+            if (carryOver) {
+                newVal = 255+newVal; // Yields a value just below 255.
+            }
+            else {
+                newVal = -newVal; // Yields a value just above 0.
+            }
+        }
+        imgData.data[i] = newVal;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    time += timeInc;
+}
+
+
+var last = null;
+
+function playImage() {
+    var imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    var avg = MyMath.avg(imgData.data);
+    if (last == null) {
+        last = avg;
+        osc.frequency.value = Math.round(avg);
+    }
+    var offset = (last-avg)*50;
+    osc.frequency.value = osc.frequency.value + Math.round(offset);
+    last = avg;
+}
+
+var animId = null;
+function step() {
+    //renderByXY(true, false);
+    renderByPixel(true, false);
+    playImage();
+    animId = requestAnimationFrame(step);
+}
+</script>
+</body>
+</html>
